@@ -17,7 +17,9 @@ The original project is no longer maintained and no longer ran as-is (for exampl
 ### Setup (this fork)
 
 - Python 3.12, Firefox with Geckodriver
-- `python -m venv .venv`, activate it, then `pip install -r requirements.txt`
+- `python -m venv .venv`, then activate it
+- Install PyTorch first, using the command from [pytorch.org](https://pytorch.org/get-started/locally/) (choose your CUDA version, or CPU). Install `torch` and `torchvision` together from that command. Tested with PyTorch 2.14.1 + CUDA 13.2; a GPU is optional.
+- `pip install -r requirements.txt` (don't add `--upgrade`, since it can replace a CUDA build of PyTorch with the CPU one)
 - VPN support (`IP/vpn.py`) is optional and off by default (`ENABLE_VPN = False`)
 - Run: `python solve_recaptcha.py`
 
