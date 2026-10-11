@@ -2,8 +2,6 @@ from ultralytics import YOLO
 import torch
 from torchvision import transforms
 from PIL import Image
-import shap
-from shap import KernelExplainer, force_plot
 import numpy as np
 import cv2
 import os

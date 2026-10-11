@@ -1,8 +1,6 @@
 from ultralytics import YOLO
 import numpy as np
 from PIL import Image
-import torch
-from torchvision import transforms
 import cv2
 
 CLASSES = ["bicycle", "bridge", "bus", "car", "chimney", "crosswalk", "hydrant", "motorcycle", "other", "palm", "stairs", "traffic"]
@@ -21,74 +19,71 @@ CLASSES = ["bicycle", "bridge", "bus", "car", "chimney", "crosswalk", "hydrant",
                             72: 'refrigerator', 73: 'book', 74: 'clock', 75: 'vase', 76: 'scissors',
                               77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'}
 """
-MAPPING = [(1, 0), (5, 2), (2, 3), (10, 6), (3,7), (9, 11)] # mapping from COCO to captcha classes
+MAPPING = [(1, 0), (5, 2), (2, 3), (10, 6), (3,7), (9, 12)] # mapping from COCO to captcha classes
 # Load a pretrained YOLOv8n model
 model = YOLO('yolov8n-seg.pt')
+LAST_PLOT = None   # annotated image for the live preview
 
+# (min detection confidence, min tile coverage), strict first, then more forgiving
+PASSES = [(0.50, 0.08), (0.30, 0.05), (0.15, 0.02)]
+
+
+def supports(class_number):
+  return any(m[1] == class_number for m in MAPPING)
+
+
+def _grid_from_masks(result, class_id_searched, conf_min, min_cover, w, h, grid_size=4):
+  grid = np.zeros((grid_size, grid_size))
+  if result.masks is None:
+    return grid
+  mask = np.zeros((h, w), dtype=np.uint8)
+  for k, cls in enumerate(result.boxes.cls):
+    if int(cls.item()) != class_id_searched:
+      continue
+    if float(result.boxes.conf[k].item()) < conf_min:
+      continue
+    for segment in result.masks[k].xy:
+      segment = np.array(segment, dtype=np.int32)
+      if len(segment) >= 3:
+        cv2.fillPoly(mask, [segment], 1)
+  cell_h, cell_w = h / grid_size, w / grid_size
+  for i in range(grid_size):
+    for j in range(grid_size):
+      cell = mask[int(i * cell_h):int((i + 1) * cell_h), int(j * cell_w):int((j + 1) * cell_w)]
+      if cell.size and float(cell.mean()) >= min_cover:
+        grid[i, j] = 1
+  return grid
 
 
 def predict(class_number, image_path):
+  global LAST_PLOT
+  LAST_PLOT = None
+
   class_id_searched = None
-  for map in MAPPING:
-    if map[1] == class_number:
-      class_id_searched = map[0]
+  for m in MAPPING:
+    if m[1] == class_number:
+      class_id_searched = m[0]
       break
-  
+  if class_id_searched is None:
+    print(f"4x4: class {class_number} has no COCO equivalent, nothing to detect")
+    return False, np.zeros((4, 4))
+
   img = Image.open(image_path)
+  w, h = img.size
 
-  # Get the image's width and height
-  image_width, image_height = img.size
+  # run once at the lowest confidence, then filter for each pass
+  results = model.predict(image_path, save=False, imgsz=320, conf=PASSES[-1][0], visualize=False)
+  result = results[0]
+  try:
+    LAST_PLOT = result.plot()
+  except Exception:
+    LAST_PLOT = None
 
-  results = model.predict(image_path, save=False, imgsz=320, conf=0.5, visualize=False)
+  for conf_min, min_cover in PASSES:
+    grid = _grid_from_masks(result, class_id_searched, conf_min, min_cover, w, h)
+    if grid.sum() > 0:
+      print(f"4x4: pass conf>={conf_min}, cover>={min_cover} -> {int(grid.sum())} tiles")
+      return True, grid
 
-  # Define the grid
-  grid_size = 4
-  grid = np.zeros((grid_size, grid_size))
-
-  # Initialize a variable to keep track of whether the searched class was found
-  class_found = False
-
-  # Check which grid cells the bounding boxes fall into
-  for result in results:
-    #print(result)
-    for i, class_id in enumerate(result.boxes.cls):
-      class_id = int(class_id.item())
-      if class_id_searched == class_id:
-        class_found = True
-
-        # Get the class name
-        class_name = result.names[class_id]
-
-        #print(f"Predicted class: {class_name}")
-
-        # Get the mask
-        mask_segments = result.masks[i].xy
-
-        # Create an empty mask
-        mask = np.zeros((image_height, image_width))
-
-        # Fill in the mask
-        for segment in mask_segments:
-            segment = np.array(segment, dtype=np.int32)
-            cv2.fillPoly(mask, [segment], 255)
-
-        cell_height = mask.shape[0] / grid_size
-        cell_width = mask.shape[1] / grid_size
-        # Iterate over each grid cell
-        for i in range(grid_size):
-            for j in range(grid_size):
-                # Calculate the pixel coordinates of the corners of the grid cell
-                top = int(i * cell_height)
-                bottom = int((i + 1) * cell_height)
-                left = int(j * cell_width)
-                right = int((j + 1) * cell_width)
-
-                # Extract the part of the mask that falls into the grid cell
-                cell_mask = mask[top:bottom, left:right]
-
-                # If any pixel in the cell is part of the mask, mark the grid cell as 1
-                if np.any(cell_mask == 255):
-                    grid[i, j] = 1
-
-  return class_found, grid
-    
+  print("4x4: nothing found even on the most forgiving pass")
+  return False, np.zeros((4, 4))

@@ -5,8 +5,9 @@ from tkinter import filedialog
 from time import sleep
 from tqdm import tqdm
 import sys
-sys.path.append("..")
-from Yolo import predict
+# Make the project root importable no matter where the script is run from
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from models.YOLO_Classification import predict
 
 # Specify the directory containing the images
 image_dir = 'RawData'
@@ -46,7 +47,8 @@ def update_image_and_button():
     filename = image_filenames[current_image_index]
 
     absolute_path = os.path.abspath(os.path.join(image_dir, filename))
-    predict.predict_tile_with_shap(absolute_path)
+    _, guess_name, guess_idx = predict.predict_tile(absolute_path)
+    print(f"{filename}: YOLO guesses '{guess_name}'")
 
     # Open the image
     img = Image.open(os.path.join(image_dir, filename))

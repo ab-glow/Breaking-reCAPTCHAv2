@@ -1,249 +1,178 @@
 from selenium import webdriver 
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys 
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from time import sleep
 import os
+import sys
 import requests
 from PIL import Image
-from io import BytesIO
-import random
-import tensorflow as tf
-import tensorflow.keras as keras 
 import numpy as np
-from tensorflow.keras.utils import load_img, img_to_array
-from Yolo import predict
-from datetime import datetime
 import time
-from tensorflow.keras.optimizers.legacy import Adam
+from datetime import datetime
 from tqdm import tqdm
+from selenium.webdriver.firefox.options import Options
 
+# Ensure parent directory is in sys.path for models import
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import YOLO model (PyTorch)
+from models.YOLO_Classification import predict
 
 # Constants
-CAPTCHA_URL = "https://www.google.com/recaptcha/api2/demo"
+CAPTCHA_URL = "https://www.google.com/recaptcha/api2/demo?hl=en"  # Forces English reCAPTCHA
 THRESHOLD = 0.2
-COLLECT_TYPE1 = False
+COLLECT_TYPE1 = True
 COLLECT_TYPE2 = True
 CLASSES = ["bicycle", "bridge", "bus", "car", "chimney", "crosswalk", "hydrant", "motorcycle", "other", "palm", "stairs", "traffic"]
-EXCLUDED_CLASSES = ["car"]
-YOLO_CLASSES = ['bicycle', 'bridge', 'bus', 'car', 'chimney', 'crosswalk', 'hydrant', 'motorcycle', 'mountain', 'other', 'palm', 'traffic']
+EXCLUDED_CLASSES = []
 YOLO_CLASSES = ['bicycle', 'bridge', 'bus', 'car', 'chimney', 'crosswalk', 'hydrant', 'motorcycle', 'mountain', 'other', 'palm', 'traffic', 'stairs']
-
-MODEL = "YOLO" # "YOLO"
 
 image_count = 0
 total_images = 100
 
-#suppress tensorflow logs
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.FATAL)
-
-# Check if data dir is present
-data_dir = os.path.join(os.getcwd(), "data/RawData")
-os.makedirs(data_dir, exist_ok=True) 
-    
-
-
-# main functions
-
-def getModel():
-    f = tf.keras.utils.get_file(
-                                fname="model.h5",
-                                origin="https://github.com/ajmandourah/Deep-reCaptcha/releases/download/model/efficentM2.h5",
-                                cache_dir=data_dir,
-                                cache_subdir='model')
-    model = keras.models.load_model(f, compile=False)
-    model.compile(optimizer=Adam(),
-                 loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-                 metrics=["accuracy"])
-    return model
-
-def getFirstModel():
-    model_path = "data/model/first_model.h5"
-    model = keras.models.load_model(model_path, compile=False)
-    model.compile(optimizer=Adam(),
-                 loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-                 metrics=["accuracy"])
-    return model
-
-
-def sliceImage(path):
-    from PIL import Image
-    img = np.array(Image.open(path))
-
-    ys = img.shape[0] // 3
-    xs = img.shape[1] // 3
-
-    topLeft = img[0:ys,0:xs]
-    topMid = img[0:ys,xs:xs*2]
-    topRight = img[0:ys,xs*2:xs*3]
-    midLeft = img[ys:ys*2,0:xs]
-    midmid = img[ys:ys*2,xs:xs*2]
-    midRight = img[ys:ys*2,xs*2:xs*3]
-    bottomLeft = img[ys*2:ys*3,0:xs]
-    bottomMid = img[ys*2:ys*3,xs:xs*2]
-    bottomRight = img[ys*2:ys*3,xs*2:xs*3]
-    
-    return [topLeft, topMid, topRight, midLeft, midmid, midRight, bottomLeft, bottomMid, bottomRight]
-
-def predict_tile(tile, model):    
-    #resize the image
-
-    i = img_to_array(tile)
-    to_predict = i.reshape((-1,224,224,3))
-    prediction = model.predict(to_predict)
-    #return a list of the prediction array, the class name with highest probability and its index 
-    return [ prediction, CLASSES[np.argmax(prediction)], np.argmax(prediction)  ]
+# Ensure raw data directories exist
+raw_data_dir = os.path.join(os.getcwd(), "data", "RawData")
+raw_data_type2_dir = os.path.join(os.getcwd(), "data", "RawDataType2")
+os.makedirs(raw_data_dir, exist_ok=True) 
+os.makedirs(raw_data_type2_dir, exist_ok=True) 
 
 COUNT = 0
-def process_tile(i, model, captcha_object, class_index, driver):
-    global COUNT
-    global image_count  
 
-    xpath = "//td[contains(@tabindex, '" + str(i+4)+ "')]"
-    matched_tile = driver.find_element(By.XPATH, xpath)
-
-    # Add the timestamp to the filename
-    timestamp = str(time.time())
-    filename = f"tile_{COUNT}_{timestamp}.png"  # Save the screenshot as .png
-
-    # Use the filename when saving and loading the image
-    matched_tile.screenshot(os.path.join(data_dir, filename))
-    img = Image.open(os.path.join(data_dir, filename)).convert('RGB')
-    img = img.resize(size=(224,224))
-
-    # Save the image as .jpg
-    jpg_filename = filename.replace('.png', '.jpg')
-    img.save(os.path.join(data_dir, jpg_filename))
-    image_count += 1
-
-    # Delete the .png file
-    os.remove(os.path.join(data_dir, filename))
-
-    if MODEL == "YOLO":
-        result = predict.predict_tile(os.path.join(data_dir, jpg_filename))
-        current_object_probability = result[0][class_index]
-        object_name = YOLO_CLASSES[result[2]]
-    else:
-        result = predict_tile(img, model)
-        current_object_probability = result[0][0][class_index]
-        object_name = CLASSES[result[2]]
-
-    #rename image
-    os.rename(os.path.join(data_dir, jpg_filename), os.path.join(data_dir, object_name + "_" + jpg_filename))
-
-    compare_probability = result[2] * THRESHOLD
-    
-    COUNT += 1
-    if object_name in captcha_object.text or current_object_probability > THRESHOLD:
-        #matched_tile.click()
-        return True
-    else:
+def process_tile(i, captcha_text, class_index, driver):
+    global COUNT, image_count
+    try:
+        tiles = WebDriverWait(driver, 5).until(
+            EC.presence_of_all_elements_located((By.CLASS_NAME, "rc-imageselect-tile"))
+        )
+    except Exception:
         return False
-    
+
+    if i >= len(tiles):
+        return False
+
+    matched_tile = tiles[i]
+    timestamp = str(time.time())
+
+    # 1. Save screenshot as .png first to satisfy Selenium
+    png_filename = f"tile_{COUNT}_{timestamp}.png"
+    png_path = os.path.join(raw_data_dir, png_filename)
+    try:
+        matched_tile.screenshot(png_path)
+
+        # 2. Convert and resize with Pillow to .jpg
+        img = Image.open(png_path).convert('RGB').resize((224, 224))
+        jpg_filename = png_filename.replace('.png', '.jpg')
+        jpg_path = os.path.join(raw_data_dir, jpg_filename)
+        img.save(jpg_path)
+
+        # 3. Clean up the initial .png screenshot
+        if os.path.exists(png_path):
+            os.remove(png_path)
+
+        image_count += 1
+    except Exception as e:
+        print(f"Error processing tile screenshot: {e}")
+        return False
+
+    # Predict class using YOLOv8
+    try:
+        result = predict.predict_tile(jpg_path)
+        current_object_probability = result[class_index]
+        object_name = YOLO_CLASSES[result]
+    except Exception:
+        object_name = "unknown"
+        current_object_probability = 0.0
+
+    # Rename image with predicted class prefix
+    new_filename = f"{object_name}_{jpg_filename}"
+    new_path = os.path.join(raw_data_dir, new_filename)
+    if os.path.exists(jpg_path):
+        try:
+            os.rename(jpg_path, new_path)
+        except Exception:
+            pass
+
+    COUNT += 1
+    return True
+
 def process_type2(driver):
     global image_count
     try:
-        save_path = "data/RawDataType2"
-        xpath_image = "/html/body/div/div/div[2]/div[2]/div/table/tbody/tr[1]/td[1]/div/div[1]/img"
+        xpath_image = "//div[@id='rc-imageselect']//img"
+        xpath_text = "//div[@id='rc-imageselect']//strong"
 
-        xpath_text = "/html/body/div/div/div[2]/div[1]/div[1]/div/strong"
-        captcha_text = driver.find_element(By.XPATH, xpath_text)
-        captcha_text = captcha_text.text
-
+        captcha_text = driver.find_element(By.XPATH, xpath_text).text
         img = driver.find_element(By.XPATH, xpath_image)
         img_url = img.get_attribute("src")
+
         response = requests.get(img_url, stream=True)
-        # Check if the request was successful
         if response.status_code == 200:
-            # Get the current timestamp and convert it to a string
             timestamp = str(time.time())
-            # Open a file in write-binary mode and save the image to it
-            with open(os.path.join(save_path, "image_" + captcha_text + "_" + timestamp + ".png"), 'wb') as f:
+            save_file = os.path.join(raw_data_type2_dir, f"image_{captcha_text}_{timestamp}.png")
+            with open(save_file, 'wb') as f:
                 f.write(response.content)
-                image_count += 1
+            image_count += 1
         return True
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Error saving Type 2 image: {e}")
         return False
 
+def get_class_index(captcha_text):
+    text_lower = captcha_text.lower()
+    for i in YOLO_CLASSES:
+        if i in text_lower or (i.endswith('s') and i[:-1] in text_lower) or (i + 's' in text_lower):
+            return YOLO_CLASSES.index(i)
+    return 0
+
 def run():
-    #getting the model from github
-    model = getFirstModel()
+    options = Options()
+    options.set_preference("intl.accept_languages", "en-US, en")
+    driver = webdriver.Firefox(options=options)
+    driver.set_window_size(600, 700)
 
-    # Setup WebDriver
-    driver = webdriver.Firefox()
+    try:
+        driver.get(CAPTCHA_URL)
+        recapcha_frame = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//iframe[@title='reCAPTCHA']"))
+        )
+        driver.switch_to.frame(recapcha_frame)
+        driver.find_element(By.CLASS_NAME, "recaptcha-checkbox-border").click()
+        sleep(3)
 
+        driver.switch_to.default_content()
+        WebDriverWait(driver, 10).until(
+            EC.frame_to_be_available_and_switch_to_it((By.XPATH, "//iframe[@title='recaptcha challenge expires in two minutes']"))
+        )
 
-    # Set window size to half the screen width
-    driver.set_window_size(600, 600)
-
-    driver.get(CAPTCHA_URL)
-
-    recapcha_frame = driver.find_element(By.XPATH, "//iframe[@title='reCAPTCHA']")
-
-    driver.switch_to.frame(recapcha_frame)
-
-    driver.find_element(By.CLASS_NAME, "recaptcha-checkbox-border").click()
-    sleep(4)
-    driver.switch_to.default_content()
-    WebDriverWait(driver, 20).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH,"//iframe[@title='recaptcha challenge expires in two minutes']")))
-
-
-    #The main loop
-    solved = False
-
-    while not solved:
-        reload = driver.find_element(By.ID, "recaptcha-reload-button")
-        title_wrapper = driver.find_element(By.ID, 'rc-imageselect')
+        title_wrapper = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, 'rc-imageselect'))
+        )
         
-        #Skipping if it is a 4x4 captcha...will be implementing it later on .
         if "squares" in title_wrapper.text and COLLECT_TYPE2:
             process_type2(driver)
-            break
-        
-        if "none" in title_wrapper.text and COLLECT_TYPE1:
-            dynamic_captcha = True
-        elif COLLECT_TYPE1:
-            dynamic_captcha = False
         else:
-            reload.click()
-            continue
+            captcha_text = title_wrapper.find_element(By.TAG_NAME, 'strong').text
+            class_index = get_class_index(captcha_text)
+            
+            for i in range(9):
+                process_tile(i, captcha_text, class_index, driver)
 
-        #Get the object of the captcha where we suppose to look for
-        captcha_object = title_wrapper.find_element(By.TAG_NAME, 'strong')
-        for i in EXCLUDED_CLASSES:
-            if i in captcha_object.text:
-                continue
-        
-        #get the class index of the captcha object if found.
-        class_index = CLASSES.index("other")
-        for i in CLASSES:
-            if i in captcha_object.text:
-                if MODEL == "YOLO":
-                    try:
-                        class_index = YOLO_CLASSES.index(i)
-                    except:
-                        class_index = CLASSES.index("other")
-                        continue
-                else:
-                    class_index = CLASSES.index(i)   
-        
-        
-        #first run of solving the captcha       
-        to_check = []
-        for i in range(9):
-            process_tile(i, model, captcha_object, class_index, driver)
-        solved = True
-    driver.close()
+    except Exception as e:
+        print(f"Run iteration error: {e}")
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
-# Create a progress bar
+# Main collection loop
 pbar = tqdm(total=total_images)
-
 while image_count < total_images:
-    image_count_before = image_count
+    before = image_count
     run()
-    image_count_after = image_count
-    pbar.update(image_count_after - image_count_before)
+    after = image_count
+    pbar.update(after - before)
 
 pbar.close()
+

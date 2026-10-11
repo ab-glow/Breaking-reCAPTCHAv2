@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Run output (can be large and may contain screenshots)
+logs/
+temp/
+data/
+
+# Local environment
+.vscode/
+*.lock
+requirements-lock.txt
