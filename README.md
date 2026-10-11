@@ -1,3 +1,32 @@
+## About this fork
+
+This repository is a fork of [aplesner/Breaking-reCAPTCHAv2](https://github.com/aplesner/Breaking-reCAPTCHAv2), the code accompanying the paper **"Breaking reCAPTCHAv2"** (COMPSAC 2024, [arXiv:2409.08831](https://arxiv.org/abs/2409.08831)). All credit for the original idea, models and training data goes to the original authors.
+
+The original project is no longer maintained and no longer ran as-is (for example, it relied on hard-coded macOS file paths). This fork was made for a university course project to get it running again and to improve it. It is for research and educational use only.
+
+### Changes in this fork
+
+- **Dynamic 3x3 challenges:** replaced the fixed `sleep` with a state-based wait for the tile fade, observed only through Selenium (no JavaScript injected into the page). Tiles are scanned, matches clicked, only clicked tiles are re-scanned, and Verify is pressed only once the grid is still.
+- **Static 3x3 challenges:** always picks the top 3 tiles by confidence.
+- **4x4 segmentation:** tile selection by mask coverage with tiered, more forgiving passes, and a live YOLO preview window.
+- **Class-order bug fixed:** `stairs` was missing from the class list, which caused an `IndexError` and mislabeled stairs and traffic lights.
+- **Unknown prompts:** prompts for classes the model does not know no longer default to "bicycle".
+- **Logging:** per-session `console.log` and `events.jsonl` under `logs/`.
+- **Housekeeping:** updated `requirements.txt` (added `torch`, `torchvision`, `numpy`; removed unused `pynput` and `shap`), removed the unused `shap` import, and fixed stale imports in `utils/label_tool.py`.
+
+### Setup (this fork)
+
+- Python 3.12, Firefox with Geckodriver
+- `python -m venv .venv`, activate it, then `pip install -r requirements.txt`
+- VPN support (`IP/vpn.py`) is optional and off by default (`ENABLE_VPN = False`)
+- Run: `python solve_recaptcha.py`
+
+### Citation
+
+If you use this work, please cite the original paper:
+
+> Plesner, A., Vontobel, T., Wattenhofer, R. "Breaking reCAPTCHAv2." COMPSAC 2024. arXiv:2409.08831
+
 # Breaking reCAPTCHAv2
 Code for the paper `Breaking reCAPTCHAv2` accepted at COMPSAC 2024 (https://arxiv.org/abs/2409.08831).
 
