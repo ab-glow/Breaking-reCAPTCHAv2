@@ -11,5 +11,13 @@ data/
 
 # Local environment
 .vscode/
+CLAUDE.md
 *.lock
 requirements-lock.txt
+
+# Per-run session folders (Session01/, Session02/, ...) anywhere in the project.
+# Exceptions: Sessions/ and Session01/ are original paper data and stay tracked.
+Session*/
+!/Sessions/
+!/Sessions/**
+!/Session01/
